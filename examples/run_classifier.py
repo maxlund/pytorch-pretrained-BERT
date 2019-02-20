@@ -91,7 +91,7 @@ class DataProcessor(object):
     @classmethod
     def _read_tsv(cls, input_file, quotechar=None):
         """Reads a tab separated value file."""
-        with open(input_file, "r") as f:
+        with open(input_file, "r", encoding='utf-8') as f:
             reader = csv.reader(f, delimiter="\t", quotechar=quotechar)
             lines = []
             for line in reader:
@@ -100,6 +100,40 @@ class DataProcessor(object):
                 lines.append(line)
             return lines
 
+class SteProcessor(DataProcessor):
+    """Processor for the MRPC data set (GLUE version)."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {}".format(os.path.join(data_dir, "train.tsv")))
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "train.tsv") , quotechar="\""), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "dev.tsv"), quotechar="\""), "dev")
+
+    def get_labels(self):
+        """See base class."""
+        return ['Troubleshooting', 'Introduction', 'Safety', 'Service',
+                'Maintenance', 'Product overview repair and service (WM)',
+                'Service data (WM)', 'Service tools (WM)', 'Operation', 'Assembly',
+                'Technical data', 'Accessories', 'Troubleshooting (WM)',
+                'Transportation, storage, disposal']
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, i)
+            text_a = line[1]
+            label = line[0]
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
 
 class MrpcProcessor(DataProcessor):
     """Processor for the MRPC data set (GLUE version)."""
@@ -401,12 +435,14 @@ def main():
         "cola": ColaProcessor,
         "mnli": MnliProcessor,
         "mrpc": MrpcProcessor,
+        "ste":  SteProcessor,
     }
 
     num_labels_task = {
         "cola": 2,
         "mnli": 3,
         "mrpc": 2,
+        "ste": 14,
     }
 
     if args.local_rank == -1 or args.no_cuda:
