@@ -101,7 +101,7 @@ class DataProcessor(object):
             return lines
 
 class SteProcessor(DataProcessor):
-    """Processor for the MRPC data set (GLUE version)."""
+    """Processor for STE module data"""
 
     def get_train_examples(self, data_dir):
         """See base class."""
@@ -113,6 +113,10 @@ class SteProcessor(DataProcessor):
         """See base class."""
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv"), quotechar="\""), "dev")
+
+    def get_test_examples(self, data_dir):
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv"), quotechar="\""), "test")
 
     def get_labels(self):
         """See base class."""
@@ -126,109 +130,12 @@ class SteProcessor(DataProcessor):
         """Creates examples for the training and dev sets."""
         examples = []
         for (i, line) in enumerate(lines):
-            if i == 0:
-                continue
             guid = "%s-%s" % (set_type, i)
             text_a = line[1]
             label = line[0]
             examples.append(
                 InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
-
-class MrpcProcessor(DataProcessor):
-    """Processor for the MRPC data set (GLUE version)."""
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        logger.info("LOOKING AT {}".format(os.path.join(data_dir, "train.tsv")))
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
-
-    def get_labels(self):
-        """See base class."""
-        return ["0", "1"]
-
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for (i, line) in enumerate(lines):
-            if i == 0:
-                continue
-            guid = "%s-%s" % (set_type, i)
-            text_a = line[3]
-            text_b = line[4]
-            label = line[0]
-            examples.append(
-                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
-        return examples
-
-
-class MnliProcessor(DataProcessor):
-    """Processor for the MultiNLI data set (GLUE version)."""
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "dev_matched.tsv")),
-            "dev_matched")
-
-    def get_labels(self):
-        """See base class."""
-        return ["contradiction", "entailment", "neutral"]
-
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for (i, line) in enumerate(lines):
-            if i == 0:
-                continue
-            guid = "%s-%s" % (set_type, line[0])
-            text_a = line[8]
-            text_b = line[9]
-            label = line[-1]
-            examples.append(
-                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
-        return examples
-
-
-class ColaProcessor(DataProcessor):
-    """Processor for the CoLA data set (GLUE version)."""
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
-
-    def get_labels(self):
-        """See base class."""
-        return ["0", "1"]
-
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for (i, line) in enumerate(lines):
-            guid = "%s-%s" % (set_type, i)
-            text_a = line[3]
-            label = line[1]
-            examples.append(
-                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
-        return examples
-
 
 def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer):
     """Loads a data file into a list of `InputBatch`s."""
@@ -373,6 +280,9 @@ def main():
     parser.add_argument("--do_eval",
                         action='store_true',
                         help="Whether to run eval on the dev set.")
+    parser.add_argument("--do_test",
+                        action='store_true',
+                        help="Whether to run training.")
     parser.add_argument("--do_lower_case",
                         action='store_true',
                         help="Set this flag if you are using an uncased model.")
@@ -432,16 +342,10 @@ def main():
         ptvsd.wait_for_attach()
 
     processors = {
-        "cola": ColaProcessor,
-        "mnli": MnliProcessor,
-        "mrpc": MrpcProcessor,
         "ste":  SteProcessor,
     }
 
     num_labels_task = {
-        "cola": 2,
-        "mnli": 3,
-        "mrpc": 2,
         "ste": 14,
     }
 
@@ -469,8 +373,8 @@ def main():
     if n_gpu > 0:
         torch.cuda.manual_seed_all(args.seed)
 
-    if not args.do_train and not args.do_eval:
-        raise ValueError("At least one of `do_train` or `do_eval` must be True.")
+    if not args.do_train and not args.do_eval and not args.do_test:
+        raise ValueError("At least one of `do_train`, `do_eval`, `or do_test` must be True.")
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train:
         raise ValueError("Output directory ({}) already exists and is not empty.".format(args.output_dir))
@@ -633,7 +537,8 @@ def main():
         model.eval()
         eval_loss, eval_accuracy = 0, 0
         nb_eval_steps, nb_eval_examples = 0, 0
- 
+        
+        logits_list = list()
         for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
             input_ids = input_ids.to(device)
             input_mask = input_mask.to(device)
@@ -645,6 +550,7 @@ def main():
                 logits = model(input_ids, segment_ids, input_mask)
 
             logits = logits.detach().cpu().numpy()
+            logits_list.append(logits)
             label_ids = label_ids.to('cpu').numpy()
             tmp_eval_accuracy = accuracy(logits, label_ids)
 
@@ -668,6 +574,60 @@ def main():
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
+
+        output_predictions_path = os.path.join(args.output_dir, "eval_logits.p")
+        with open(output_predictions_path, "wb") as of:
+            import pickle
+            pickle.dump(logits_list, of)
+
+    if args.do_test and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
+        model.load_state_dict(torch.load(os.path.join(args.output_dir, "pytorch_model.bin")))
+        test_examples = processor.get_test_examples(args.data_dir)
+        test_features = convert_examples_to_features(
+            test_examples, label_list, args.max_seq_length, tokenizer)
+        logger.info("  Num examples = %d", len(test_examples))
+        logger.info("  Batch size = %d", args.eval_batch_size)
+        all_input_ids = torch.tensor([f.input_ids for f in test_features], dtype=torch.long)
+        all_input_mask = torch.tensor([f.input_mask for f in test_features], dtype=torch.long)
+        all_segment_ids = torch.tensor([f.segment_ids for f in test_features], dtype=torch.long)
+        all_label_ids = torch.tensor([f.label_id for f in test_features], dtype=torch.long)
+        test_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
+        # Run prediction for full data
+        test_sampler = SequentialSampler(test_data)
+        test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=args.eval_batch_size)
+
+        model.eval()
+        test_loss, test_accuracy = 0, 0
+        nb_test_steps, nb_test_examples = 0, 0
+        
+        logits_list = list()
+        for input_ids, input_mask, segment_ids, label_ids in tqdm(test_dataloader, desc="testing"):
+            input_ids = input_ids.to(device)
+            input_mask = input_mask.to(device)
+            segment_ids = segment_ids.to(device)
+            label_ids = label_ids.to(device)
+
+            with torch.no_grad():
+                logits = model(input_ids, segment_ids, input_mask)
+
+            logits = logits.detach().cpu().numpy()
+            logits_list.append(logits)
+            label_ids = label_ids.to('cpu').numpy()
+
+        logit_preds = list()
+        for batch in logits_list:
+            for preds in batch:
+                logit_preds.append(preds)
+
+        label_id_map = {i: label for i, label in enumerate(label_list)}
+        label_preds = [label_id_map[np.argmax(l)] for l in logit_preds]
+
+        import pickle       
+        logit_preds_path = os.path.join(args.output_dir, "logit_preds.p")
+        pickle.dump(logit_preds, open(logit_preds_path, 'wb'))
+
+        label_preds_path = os.path.join(args.output_dir, "label_preds.p")
+        pickle.dump(label_preds, open(label_preds_path, 'wb'))
 
 if __name__ == "__main__":
     main()
