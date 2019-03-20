@@ -120,11 +120,118 @@ class SteProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['Troubleshooting', 'Introduction', 'Safety', 'Service',
-                'Maintenance', 'Product overview repair and service (WM)',
-                'Service data (WM)', 'Service tools (WM)', 'Operation', 'Assembly',
-                'Technical data', 'Accessories', 'Troubleshooting (WM)',
-                'Transportation, storage, disposal']
+        return ['Troubleshooting', 'Introduction', 'Service tools (WM)', 'Safety',
+                'Service', 'Maintenance',
+                'Product overview repair and service (WM)', 'Service data (WM)',
+                'Operation', 'Assembly', 'Accessories', 'Technical data',
+                'Delivery and service (WM)', 'Troubleshooting (WM)', 'Warranty',
+                'Transportation, storage, disposal', 'Function overview (WM)',
+                'Installation', 'Warning', 'Cleaning (WM HCP)']
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            guid = "%s-%s" % (set_type, i)
+            text_a = line[1]
+            label = line[0]
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
+
+class SteFilteredProcessor(DataProcessor):
+    """Processor for STE module data"""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {}".format(os.path.join(data_dir, "train.tsv")))
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "train.tsv") , quotechar="\""), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "dev.tsv"), quotechar="\""), "dev")
+
+    def get_test_examples(self, data_dir):
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv"), quotechar="\""), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ['Troubleshooting', 'Introduction', 'Service tools (WM)', 'Safety',
+                'Service', 'Maintenance',
+                'Product overview repair and service (WM)', 'Service data (WM)',
+                'Operation', 'Assembly', 'Accessories', 'Technical data',
+                'Troubleshooting (WM)', 'Transportation, storage, disposal']
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            guid = "%s-%s" % (set_type, i)
+            text_a = line[1]
+            label = line[0]
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
+
+class AngularProcessor(DataProcessor):
+    """Processor for Angular github issue data"""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {}".format(os.path.join(data_dir, "train.tsv")))
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "train.tsv") , quotechar="\""), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "dev.tsv"), quotechar="\""), "dev")
+
+    def get_test_examples(self, data_dir):
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv"), quotechar="\""), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ['severity1_confusing', 'severity2_inconvenient',
+                'severity3_broken', 'severity4_memleak', 'severity5_regression',
+                'severity6_security']
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            guid = "%s-%s" % (set_type, i)
+            text_a = line[1]
+            label = line[0]
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
+
+class SymfonyProcessor(DataProcessor):
+    """Processor for Symfony github issue data"""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {}".format(os.path.join(data_dir, "train.tsv")))
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "train.tsv") , quotechar="\""), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "dev.tsv"), quotechar="\""), "dev")
+
+    def get_test_examples(self, data_dir):
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv"), quotechar="\""), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ['security', 'other']
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -282,7 +389,7 @@ def main():
                         help="Whether to run eval on the dev set.")
     parser.add_argument("--do_test",
                         action='store_true',
-                        help="Whether to run training.")
+                        help="Whether to run testing and output logits and label predictions.")
     parser.add_argument("--do_lower_case",
                         action='store_true',
                         help="Set this flag if you are using an uncased model.")
@@ -343,10 +450,16 @@ def main():
 
     processors = {
         "ste":  SteProcessor,
+        "ste-filtered": SteFilteredProcessor, 
+        "angular": AngularProcessor,
+        'symfony': SymfonyProcessor,
     }
 
     num_labels_task = {
-        "ste": 14,
+        "ste-filtered": 14,
+        "ste": 20,
+        "angular": 6,
+        'symfony': 2,
     }
 
     if args.local_rank == -1 or args.no_cuda:
@@ -581,7 +694,7 @@ def main():
             pickle.dump(logits_list, of)
 
     if args.do_test and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        model.load_state_dict(torch.load(os.path.join(args.output_dir, "pytorch_model.bin")))
+        model.load_state_dict(torch.load(os.path.join(args.bert_model, "pytorch_model.bin")))
         test_examples = processor.get_test_examples(args.data_dir)
         test_features = convert_examples_to_features(
             test_examples, label_list, args.max_seq_length, tokenizer)

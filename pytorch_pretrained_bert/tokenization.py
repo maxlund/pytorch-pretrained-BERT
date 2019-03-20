@@ -49,6 +49,7 @@ VOCAB_NAME = 'vocab.txt'
 
 def load_vocab(vocab_file):
     """Loads a vocabulary file into a dictionary."""
+    print('in load_vocab:', vocab_file)
     vocab = collections.OrderedDict()
     index = 0
     with open(vocab_file, "r", encoding="utf-8") as reader:
@@ -127,6 +128,8 @@ class BertTokenizer(object):
             vocab_file = pretrained_model_name_or_path
         if os.path.isdir(vocab_file):
             vocab_file = os.path.join(vocab_file, VOCAB_NAME)
+
+        print('VOCAB FILE:', vocab_file)
         # redirect to the cache, if necessary
         try:
             resolved_vocab_file = cached_path(vocab_file, cache_dir=cache_dir)
