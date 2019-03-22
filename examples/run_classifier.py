@@ -371,6 +371,9 @@ def main():
                         help="The output directory where the model predictions and checkpoints will be written.")
 
     ## Other parameters
+    parser.add_argument("--only_basic_tokenization",
+                        action='store_true',
+                        help="Whether to do WordPiece tokenization or only basic tokenization.")
     parser.add_argument("--cache_dir",
                         default="",
                         type=str,
@@ -503,7 +506,7 @@ def main():
     num_labels = num_labels_task[task_name]
     label_list = processor.get_labels()
 
-    tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
+    tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case, only_basic_tokenization=args.only_basic_tokenization)
 
     train_examples = None
     num_train_optimization_steps = None

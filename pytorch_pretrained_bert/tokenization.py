@@ -49,7 +49,6 @@ VOCAB_NAME = 'vocab.txt'
 
 def load_vocab(vocab_file):
     """Loads a vocabulary file into a dictionary."""
-    print('in load_vocab:', vocab_file)
     vocab = collections.OrderedDict()
     index = 0
     with open(vocab_file, "r", encoding="utf-8") as reader:
@@ -76,7 +75,8 @@ class BertTokenizer(object):
     """Runs end-to-end tokenization: punctuation splitting + wordpiece"""
 
     def __init__(self, vocab_file, do_lower_case=True, max_len=None,
-                 never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]")):
+                 never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]"),
+                 only_basic_tokenization=False):
         if not os.path.isfile(vocab_file):
             raise ValueError(
                 "Can't find a vocabulary file at path '{}'. To load the vocabulary from a Google pretrained "
@@ -86,8 +86,9 @@ class BertTokenizer(object):
             [(ids, tok) for tok, ids in self.vocab.items()])
         self.basic_tokenizer = BasicTokenizer(do_lower_case=do_lower_case,
                                               never_split=never_split)
-        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab)
+        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, only_basic_tokenization=only_basic_tokenization)
         self.max_len = max_len if max_len is not None else int(1e12)
+        self.only_basic_tokenization = only_basic_tokenization
 
     def tokenize(self, text):
         split_tokens = []
@@ -100,7 +101,7 @@ class BertTokenizer(object):
         """Converts a sequence of tokens into ids using the vocab."""
         ids = []
         for token in tokens:
-            ids.append(self.vocab[token])
+                ids.append(self.vocab[token])
         if len(ids) > self.max_len:
             raise ValueError(
                 "Token indices sequence length is longer than the specified maximum "
@@ -128,8 +129,6 @@ class BertTokenizer(object):
             vocab_file = pretrained_model_name_or_path
         if os.path.isdir(vocab_file):
             vocab_file = os.path.join(vocab_file, VOCAB_NAME)
-
-        print('VOCAB FILE:', vocab_file)
         # redirect to the cache, if necessary
         try:
             resolved_vocab_file = cached_path(vocab_file, cache_dir=cache_dir)
@@ -277,10 +276,11 @@ class BasicTokenizer(object):
 class WordpieceTokenizer(object):
     """Runs WordPiece tokenization."""
 
-    def __init__(self, vocab, unk_token="[UNK]", max_input_chars_per_word=100):
+    def __init__(self, vocab, unk_token="[UNK]", max_input_chars_per_word=100, only_basic_tokenization=False):
         self.vocab = vocab
         self.unk_token = unk_token
         self.max_input_chars_per_word = max_input_chars_per_word
+        self.only_basic_tokenization = only_basic_tokenization
 
     def tokenize(self, text):
         """Tokenizes a piece of text into its word pieces.
@@ -307,25 +307,34 @@ class WordpieceTokenizer(object):
                 output_tokens.append(self.unk_token)
                 continue
 
+
             is_bad = False
             start = 0
             sub_tokens = []
-            while start < len(chars):
-                end = len(chars)
-                cur_substr = None
-                while start < end:
-                    substr = "".join(chars[start:end])
-                    if start > 0:
-                        substr = "##" + substr
-                    if substr in self.vocab:
-                        cur_substr = substr
+
+            if not self.only_basic_tokenization:
+                while start < len(chars):
+                    end = len(chars)
+                    cur_substr = None
+                    while start < end:
+                        substr = "".join(chars[start:end])
+                        if start > 0:
+                            substr = "##" + substr
+                        if substr in self.vocab:
+                            cur_substr = substr
+                            break
+                        end -= 1
+                    if cur_substr is None:
+                        is_bad = True
                         break
-                    end -= 1
-                if cur_substr is None:
+                    sub_tokens.append(cur_substr)
+                    start = end
+            else:
+                if token in self.vocab:
+                    cur_substr = token
+                    sub_tokens.append(cur_substr)
+                else:
                     is_bad = True
-                    break
-                sub_tokens.append(cur_substr)
-                start = end
 
             if is_bad:
                 output_tokens.append(self.unk_token)
