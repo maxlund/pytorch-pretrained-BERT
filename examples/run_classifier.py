@@ -23,6 +23,8 @@ import logging
 import os
 import random
 import sys
+from shutil import copyfile
+import pickle
 
 import numpy as np
 import torch
@@ -693,10 +695,10 @@ def main():
 
         output_predictions_path = os.path.join(args.output_dir, "eval_logits.p")
         with open(output_predictions_path, "wb") as of:
-            import pickle
             pickle.dump(logits_list, of)
 
     if args.do_test and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
+        copyfile(os.path.join(args.bert_model, "vocab.txt"), os.path.join(args.output_dir, "vocab.txt"))
         model.load_state_dict(torch.load(os.path.join(args.bert_model, "pytorch_model.bin")))
         test_examples = processor.get_test_examples(args.data_dir)
         test_features = convert_examples_to_features(
@@ -737,12 +739,15 @@ def main():
 
         label_id_map = {i: label for i, label in enumerate(label_list)}
         label_preds = [label_id_map[np.argmax(l)] for l in logit_preds]
+        true_preds = [label_id_map[l] for l in label_ids]
+        
+        true_preds_path = os.path.join(args.output_dir, "true_labels.p")
+        pickle.dump(true_preds, open(true_preds_path, 'wb'))
 
-        import pickle       
-        logit_preds_path = os.path.join(args.output_dir, "logit_preds.p")
+        logit_preds_path = os.path.join(args.output_dir, "test_logit_preds.p")
         pickle.dump(logit_preds, open(logit_preds_path, 'wb'))
 
-        label_preds_path = os.path.join(args.output_dir, "label_preds.p")
+        label_preds_path = os.path.join(args.output_dir, "test_label_preds.p")
         pickle.dump(label_preds, open(label_preds_path, 'wb'))
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ import os
 import random
 import sys
 import pickle
+from shutil import copyfile
 
 import numpy as np
 import torch
@@ -347,55 +348,7 @@ def accuracy(out, labels):
     outputs = np.argmax(out, axis=1)
     return np.sum(outputs == labels)
 
-def get_eval_loss():
-    eval_examples = processor.get_dev_examples(args.data_dir)
-    eval_features = convert_examples_to_features(
-        eval_examples, label_list, args.max_seq_length, tokenizer)
-    logger.info("***** Running evaluation *****")
-    logger.info("  Num examples = %d", len(eval_examples))
-    logger.info("  Batch size = %d", args.eval_batch_size)
-    all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-    all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-    all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-    all_label_ids = torch.tensor([f.label_id for f in eval_features], dtype=torch.long)
-    eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
-    # Run prediction for full data
-    eval_sampler = SequentialSampler(eval_data)
-    eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
-
-    model.eval()
-    eval_loss, eval_accuracy = 0, 0
-    nb_eval_steps, nb_eval_examples = 0, 0
-    
-    logits_list = list()
-    for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
-        input_ids = input_ids.to(device)
-        input_mask = input_mask.to(device)
-        segment_ids = segment_ids.to(device)
-        label_ids = label_ids.to(device)
-
-        with torch.no_grad():
-            tmp_eval_loss = model(input_ids, segment_ids, input_mask, label_ids)
-            logits = model(input_ids, segment_ids, input_mask)
-
-        logits = logits.detach().cpu().numpy()
-        logits_list.append(logits)
-        label_ids = label_ids.to('cpu').numpy()
-        tmp_eval_accuracy = accuracy(logits, label_ids)
-
-        eval_loss += tmp_eval_loss.mean().item()
-        eval_accuracy += tmp_eval_accuracy
-
-        nb_eval_examples += input_ids.size(0)
-        nb_eval_steps += 1
-
-    eval_loss = eval_loss / nb_eval_steps
-    eval_accuracy = eval_accuracy / nb_eval_examples
-
-    return eval_loss
-
 def main():
-    last_epoch_loss = np.inf
     parser = argparse.ArgumentParser()
 
     ## Required parameters
@@ -616,8 +569,6 @@ def main():
     global_step = 0
     nb_tr_steps = 0
     tr_loss = 0
-    epoch_losses = dict()
-    min_loss_delta = 0.01
     if args.do_train:
         train_features = convert_examples_to_features(
             train_examples, label_list, args.max_seq_length, tokenizer)
@@ -636,8 +587,11 @@ def main():
             train_sampler = DistributedSampler(train_data)
         train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
 
-        model.train()
+        epoch_losses = dict()
+        min_loss_delta = 0.01
+        min_loss = np.inf
         for i in trange(int(args.num_train_epochs), desc="Epoch"):
+            model.train()
             tr_loss = 0
             nb_tr_examples, nb_tr_steps = 0, 0
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
@@ -668,15 +622,56 @@ def main():
                     optimizer.zero_grad()
                     global_step += 1
 
-            current_loss = get_eval_loss()
+            eval_examples = processor.get_dev_examples(args.data_dir)
+            eval_features = convert_examples_to_features(
+                eval_examples, label_list, args.max_seq_length, tokenizer)
+            logger.info("***** Running evaluation *****")
+            logger.info("  Num examples = %d", len(eval_examples))
+            logger.info("  Batch size = %d", args.eval_batch_size)
+            all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
+            all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
+            all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
+            all_label_ids = torch.tensor([f.label_id for f in eval_features], dtype=torch.long)
+            eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
+            # Run prediction for full data
+            eval_sampler = SequentialSampler(eval_data)
+            eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
+
+            model.eval()
+            eval_loss, eval_accuracy = 0, 0
+            nb_eval_steps, nb_eval_examples = 0, 0
+            
+            logits_list = list()
+            for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
+                input_ids = input_ids.to(device)
+                input_mask = input_mask.to(device)
+                segment_ids = segment_ids.to(device)
+                label_ids = label_ids.to(device)
+
+                with torch.no_grad():
+                    tmp_eval_loss = model(input_ids, segment_ids, input_mask, label_ids)
+                    logits = model(input_ids, segment_ids, input_mask)
+
+                logits = logits.detach().cpu().numpy()
+                logits_list.append(logits)
+                label_ids = label_ids.to('cpu').numpy()
+                eval_loss += tmp_eval_loss.mean().item()
+                nb_eval_examples += input_ids.size(0)
+                nb_eval_steps += 1
+
+            eval_loss = eval_loss / nb_eval_steps
+
+            #current_loss = get_eval_loss(processor, args, label_list, tokenizer, model, device)
+            current_loss = eval_loss
             epoch_losses[i] = current_loss
             epoch_losses_path = os.path.join(args.output_dir, "epoch_losses.p")
-            pickle.dump(epoch_losses, open(epoc_losses_path, 'wb'))
-            if current_loss < last_epoch_loss:
-                print(f'EPOCH: {i}\nLast epoch loss: {last_epoch_loss}\nThis epoch loss: {current_loss}')
-                last_epoch_loss = current_loss
-            elif abs(last_epoch_loss - current_loss) > min_loss_delta:
-                print(f'Loss increased by {abs(last_epoch_loss - current_loss)}! Stopping training')
+            pickle.dump(epoch_losses, open(epoch_losses_path, 'wb'))
+            print(f'\n\nEPOCH: {i}\nLast epoch loss: {min_loss}\nThis epoch loss: {current_loss}\n')
+            if current_loss < min_loss:
+                print(f'\nLoss decreased!\nNew min_loss: {current_loss}\n')
+                min_loss = current_loss
+            elif i > 4 and abs(min_loss - current_loss) > min_loss_delta:
+                print(f'\nLoss increased by {abs(min_loss - current_loss)}\n! Stopping training\n')
                 break
 
     if args.do_train:
@@ -741,6 +736,7 @@ def main():
         eval_loss = eval_loss / nb_eval_steps
         eval_accuracy = eval_accuracy / nb_eval_examples
         loss = tr_loss/nb_tr_steps if args.do_train else None
+        
         result = {'eval_loss': eval_loss,
                   'eval_accuracy': eval_accuracy,
                   'global_step': global_step,
@@ -753,13 +749,27 @@ def main():
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
 
-        output_predictions_path = os.path.join(args.output_dir, "eval_logits.p")
-        with open(output_predictions_path, "wb") as of:
-            import pickle
-            pickle.dump(logits_list, of)
+        eval_logit_preds = list()
+        for batch in logits_list:
+            for preds in batch:
+                eval_logit_preds.append(preds)
+
+        label_id_map = {i: label for i, label in enumerate(label_list)}
+
+        true_eval_labels = [label_id_map[f.label_id] for f in eval_features]
+        true_eval_labels_path = os.path.join(args.output_dir, "eval_true_labels.p")
+        pickle.dump(true_eval_labels, open(true_eval_labels_path, 'wb'))
+
+        eval_label_preds = [label_id_map[np.argmax(l)] for l in eval_logit_preds]
+        eval_label_preds_path = os.path.join(args.output_dir, "eval_pred_labels.p")
+        pickle.dump(eval_label_preds, open(eval_label_preds_path, 'wb'))
+
+        eval_logit_preds_path = os.path.join(args.output_dir, "eval_pred_logits.p")
+        pickle.dump(eval_logit_preds, open(eval_logit_preds_path, 'wb'))
 
     if args.do_test and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        model.load_state_dict(torch.load(os.path.join(args.bert_model, "pytorch_model.bin")))
+        copyfile(os.path.join(args.bert_model, "vocab.txt"), os.path.join(args.output_dir, "vocab.txt"))
+        model.load_state_dict(torch.load(os.path.join(args.output_dir, "pytorch_model.bin")))
         test_examples = processor.get_test_examples(args.data_dir)
         test_features = convert_examples_to_features(
             test_examples, label_list, args.max_seq_length, tokenizer)
@@ -786,25 +796,52 @@ def main():
             label_ids = label_ids.to(device)
 
             with torch.no_grad():
+                tmp_test_loss = model(input_ids, segment_ids, input_mask, label_ids)
                 logits = model(input_ids, segment_ids, input_mask)
 
             logits = logits.detach().cpu().numpy()
             logits_list.append(logits)
             label_ids = label_ids.to('cpu').numpy()
 
-        logit_preds = list()
+            tmp_test_accuracy = accuracy(logits, label_ids)
+
+            test_loss += tmp_test_loss.mean().item()
+            test_accuracy += tmp_test_accuracy
+
+            nb_test_examples += input_ids.size(0)
+            nb_test_steps += 1
+
+        test_loss = test_loss / nb_test_steps
+        test_accuracy = test_accuracy / nb_test_examples
+
+        test_logit_preds = list()
         for batch in logits_list:
             for preds in batch:
-                logit_preds.append(preds)
+                test_logit_preds.append(preds)
 
         label_id_map = {i: label for i, label in enumerate(label_list)}
-        label_preds = [label_id_map[np.argmax(l)] for l in logit_preds]
-       
-        logit_preds_path = os.path.join(args.output_dir, "logit_preds.p")
-        pickle.dump(logit_preds, open(logit_preds_path, 'wb'))
 
-        label_preds_path = os.path.join(args.output_dir, "label_preds.p")
+        true_test_labels = [label_id_map[f.label_id] for f in test_features]
+        true_test_labels_path = os.path.join(args.output_dir, "test_true_labels.p")
+        pickle.dump(true_test_labels, open(true_test_labels_path, 'wb'))
+
+        label_preds = [label_id_map[np.argmax(l)] for l in test_logit_preds]
+        label_preds_path = os.path.join(args.output_dir, "test_pred_labels.p")
         pickle.dump(label_preds, open(label_preds_path, 'wb'))
+
+        logit_preds_path = os.path.join(args.output_dir, "test_pred_logits.p")
+        pickle.dump(test_logit_preds, open(logit_preds_path, 'wb'))
+
+        result = {'test_loss': test_loss,
+                  'test_accuracy': test_accuracy}
+        output_test_file = os.path.join(args.output_dir, "test_results.txt")
+        with open(output_test_file, "w") as writer:
+            logger.info("***** Test results *****")
+            for key in sorted(result.keys()):
+                logger.info("  %s = %s", key, str(result[key]))
+                writer.write("%s = %s\n" % (key, str(result[key])))
+
+
 
 if __name__ == "__main__":
     main()
